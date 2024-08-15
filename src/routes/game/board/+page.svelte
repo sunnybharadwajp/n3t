@@ -1,23 +1,37 @@
 <script>
-   import { onMount } from "svelte";
-   import { writable } from "svelte/store";
+   import { onMount, onDestroy } from "svelte";
    import {
-      dimension,
-      winRule,
       board,
       currentTurn,
       winner,
-   } from "$lib/store.js";
+      multiplayer,
+      players,
+   } from "$lib/store";
+   import Pusher from "pusher-js";
+
+   export let data;
+   const env = data.env;
+   const dimension = data.dimension;
+   const winCondition = data.winCondition;
+
+   let gameMode, currentPlayer;
+   gameMode = $multiplayer ? "multiplayer" : "singleplayer";
 
    onMount(() => {
-      updateBoard($dimension);
+      board.set(createBoard(dimension));
    });
 
-   let currentDimension;
-   let winCondition;
+   // Pusher.logToConsole = true;
 
-   $: currentDimension = $dimension;
-   $: winCondition = $winRule;
+   let pusher = new Pusher(data.env.PUSHER_KEY, {
+      cluster: data.env.CLUSTER,
+   });
+
+   let channel = pusher.subscribe("demo");
+
+   channel.bind("move-made", function (data) {
+      console.log("pusher heard it!");
+   });
 
    const createBoard = (dimension) => {
       let board = [];
@@ -31,36 +45,34 @@
       return board;
    };
 
-   const updateBoard = (dimension) => {
-      if (dimension) {
-         currentDimension = dimension;
-         board.set(createBoard(dimension));
-      }
-   };
-
-   const setDimension = (e) => {
-      dimension.set(e.target.value);
-   };
-
-   const setWinCondition = (e) => {
-      winRule.set(e.target.value);
-   };
-
    const makeMove = (cell, turn) => {
-      if ($currentTurn === "X") {
-         currentTurn.set("O");
-      } else {
-         currentTurn.set("X");
-      }
-      if (cell.value === null && !$winner) {
-         cell.value = turn;
-         board.update((b) => b);
-         if (checkWinner(cell, turn)) {
-            winner.set(turn);
-         } else {
-            currentTurn.set(turn === "X" ? "O" : "X");
-         }
-      }
+      const response = fetch("/api/make_move", {
+         method: "POST",
+         headers: {
+            "Content-Type": "application/json",
+         },
+         body: JSON.stringify({
+            roomCode: "demo",
+            cell: cell,
+            player: currentPlayer,
+         }),
+      });
+
+      // if($currentTurn === 'X') {
+      //     currentTurn.set('O');
+      // } else {
+      //     currentTurn.set('X');
+      // }
+
+      // if (cell.value === null && !$winner) {
+      //     cell.value = turn;
+      //     board.update((b) => b);
+      //     if (checkWinner(cell, turn)) {
+      //         winner.set(turn);
+      //     } else {
+      //         currentTurn.set(turn === 'X' ? 'O' : 'X');
+      //     }
+      // }
    };
 
    const checkWinner = (cell, turn) => {
@@ -83,7 +95,7 @@
       let count = 0;
       let x = cell.x + dx;
       let y = cell.y + dy;
-      while (x >= 0 && x < currentDimension && y >= 0 && y < currentDimension) {
+      while (x >= 0 && x < dimension && y >= 0 && y < dimension) {
          const currentCell = $board[x][y];
          if (currentCell === undefined || currentCell.value !== turn) {
             break;
@@ -94,30 +106,22 @@
       }
       return count;
    };
+
+   onDestroy(() => {
+      pusher.unsubscribe("demo");
+      pusher.disconnect();
+   });
 </script>
 
-<div class="form">
-   Dimension:
-   <select on:change={setDimension}>
-      {#each Array.from({ length: 18 }, (_, i) => i + 3) as num}
-         <option value={num}>{num}</option>
-      {/each}
-   </select>
-   Win Condition:
-   <select on:change={setWinCondition}>
-      <option value="3">3</option>
-      <option value="4">4</option>
-      <option value="5">5</option>
-   </select>
-   <button on:click={() => updateBoard($dimension)}>Update Board</button>
-</div>
-<div class="spacer"></div>
 <div
    class="board"
-   style={`grid-template-columns: repeat(${currentDimension}, 40px); grid-template-rows: repeat(${currentDimension}, 40px);`}
+   style={`grid-template-columns: repeat(${dimension}, 40px); grid-template-rows: repeat(${dimension}, 40px);`}
 >
    {#each $board as row}
       {#each row as cell}
+         <!-- svelte-ignore a11y-click-events-have-key-events -->
+         <!-- svelte-ignore missing-declaration -->
+         <!-- svelte-ignore a11y-no-static-element-interactions -->
          <div class="cell" on:click={() => makeMove(cell, $currentTurn)}>
             {#if cell.value}
                {cell.value}
@@ -126,14 +130,12 @@
       {/each}
    {/each}
 </div>
+
 {#if $winner}
    <div class="winner">Winner: {$winner}</div>
 {/if}
 
 <style>
-   .spacer {
-      padding: 1rem;
-   }
    .board {
       display: grid;
       gap: 1px;
